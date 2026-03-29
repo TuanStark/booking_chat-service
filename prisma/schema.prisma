@@ -1,0 +1,152 @@
+// =============================================================================
+// Chat Service — Prisma Schema
+// Database: PostgreSQL (consistent with all other services in the platform)
+//
+// Design decisions:
+// - Denormalized lastMessageText/lastMessageAt on Conversation for O(1) listing
+// - unreadCount on Participant to avoid COUNT queries on every render
+// - senderRole denormalized on Message to avoid JOINs when rendering bubbles
+// - JSONB metadata for extensibility without migrations
+// - Cursor-based pagination via (conversationId, createdAt DESC) index
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum ConversationType {
+  SUPPORT // User ↔ Admin (primary use case)
+}
+
+enum ConversationStatus {
+  ACTIVE
+  ARCHIVED
+  CLOSED // Resolved support conversations
+}
+
+enum ParticipantRole {
+  USER // End user who initiated
+  ADMIN // Admin/support staff
+}
+
+enum MessageType {
+  TEXT
+  SYSTEM // "Conversation closed", "Admin joined", etc.
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+/// Represents a support chat conversation between User ↔ Admin.
+/// Each user can have multiple conversations (e.g., different topics).
+model Conversation {
+  id     String             @id @default(cuid())
+  type   ConversationType   @default(SUPPORT)
+  status ConversationStatus @default(ACTIVE)
+
+  /// Display title (auto-generated: "Hỗ trợ - {userName}")
+  title String?
+
+  /// Optional link to relevant entity for context.
+  /// Uses polymorphic pattern instead of hard FK (cross-service boundary).
+  contextType String? // "booking", "room", "building"
+  contextId   String? // The entity ID in that service's DB
+
+  /// The user who initiated this support conversation
+  userId String
+
+  /// Denormalized fields for fast conversation listing without JOINs.
+  /// Updated atomically in a transaction when a new message is created.
+  lastMessageId   String?   @unique
+  lastMessageAt   DateTime?
+  lastMessageText String?   @db.VarChar(200)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  participants ConversationParticipant[]
+  messages     Message[]
+  lastMessage  Message?                 @relation("LastMessage", fields: [lastMessageId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([lastMessageAt(sort: Desc)])
+  @@index([contextType, contextId])
+  @@map("conversations")
+}
+
+/// Many-to-many join table: which users are in which conversations.
+/// Stores per-user read state and preferences.
+model ConversationParticipant {
+  id             String          @id @default(cuid())
+  conversationId String
+  userId         String // References auth-service User.id (cross-service by convention)
+  role           ParticipantRole @default(USER)
+
+  /// Cursor: last message this user has read — enables accurate unread count
+  lastReadMessageId String?
+  lastReadAt        DateTime?
+
+  /// Denormalized unread count for fast sidebar rendering.
+  /// Incremented when new message arrives, reset to 0 on mark_read.
+  unreadCount Int @default(0)
+
+  /// User preference: mute notifications for this conversation
+  isMuted Boolean @default(false)
+
+  joinedAt DateTime @default(now())
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([userId, conversationId])
+  @@map("conversation_participants")
+}
+
+/// Individual chat messages within a conversation.
+model Message {
+  id             String          @id @default(cuid())
+  conversationId String
+  senderId       String // userId from auth-service
+  senderRole     ParticipantRole // USER or ADMIN — denormalized for rendering
+
+  type    MessageType @default(TEXT)
+  content String // Text content (XSS-sanitized before save)
+
+  /// Optional metadata for SYSTEM messages (e.g., reason for closing)
+  metadata Json? @db.JsonB
+
+  /// Reply threading: optional reference to parent message
+  replyToId String?
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   Message[] @relation("MessageReplies")
+
+  /// Soft delete for admin moderation (preserves audit trail)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  /// Edit tracking
+  isEdited Boolean   @default(false)
+  editedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lastOfConv   Conversation? @relation("LastMessage")
+
+  // Primary query: "get messages for conversation X, newest first"
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([senderId])
+  @@index([replyToId])
+  @@map("messages")
+}

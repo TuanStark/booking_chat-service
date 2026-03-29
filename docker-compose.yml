@@ -1,0 +1,35 @@
+# Chat service — chạy cùng stack (DB chat thường dùng booking_infra/infra).
+# Sao chép .env.example → .env và chỉnh DATABASE_URL (vd: host chat-db:5432 trong cùng network).
+
+services:
+  chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: booking-chat-service:latest
+    container_name: booking-chat-service
+    working_dir: /app
+    ports:
+      - "${CHAT_PORT:-3013}:3013"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: "3013"
+    command:
+      - sh
+      - -c
+      - npx prisma migrate deploy && exec node dist/main
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3013/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - my_custom_network
+
+networks:
+  my_custom_network:
+    external: true

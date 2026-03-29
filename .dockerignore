@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+*.md
+.env
+.env.*
+!.env.example
+docker-compose*.yml
+.vscode
+.idea
+test
+*.spec.ts
+*.e2e-spec.ts
+tsconfig.build.tsbuildinfo
