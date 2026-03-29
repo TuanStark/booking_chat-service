@@ -3,6 +3,11 @@
 /node_modules
 /build
 
+# Không commit bản biên dịch nhầm của prisma.config (chỉ dùng prisma.config.ts)
+/prisma.config.js
+/prisma.config.js.map
+/prisma.config.d.ts
+
 # Logs
 logs
 *.log
@@ -54,3 +59,5 @@ pids
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+/keys

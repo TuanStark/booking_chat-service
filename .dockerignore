@@ -1,6 +1,11 @@
 node_modules
 dist
 coverage
+
+# Prisma CLI phải dùng prisma.config.ts; file .js build lộn từ tsc làm lỗi parse trong Docker
+prisma.config.js
+prisma.config.js.map
+prisma.config.d.ts
 .git
 .gitignore
 *.md

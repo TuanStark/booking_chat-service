@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ChatGateway } from './chat.gateway';
 import { MessagesModule } from '../modules/messages/messages.module';
 import { ConversationsModule } from '../modules/conversations/conversations.module';
+import { resolveJwtPublicKeyPem } from '../config/jwt-public-key.util';
 
 @Module({
   imports: [
@@ -13,8 +14,10 @@ import { ConversationsModule } from '../modules/conversations/conversations.modu
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET'),
-        signOptions: { expiresIn: '7d' },
+        publicKey: resolveJwtPublicKeyPem(config),
+        verifyOptions: {
+          algorithms: ['RS256'],
+        },
       }),
     }),
   ],

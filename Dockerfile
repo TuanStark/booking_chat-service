@@ -20,7 +20,8 @@ COPY . .
 ARG DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
 ENV DATABASE_URL=${DATABASE_URL}
 
-RUN npx prisma generate && npm run build
+RUN npx prisma generate && npm run build && \
+    test -f dist/main.js || (echo "ERROR: dist/main.js missing after nest build" && ls -laR dist 2>/dev/null || true && exit 1)
 
 # --- Pruner: prod deps + client ---
 FROM node:20-alpine AS pruner
@@ -41,6 +42,8 @@ ARG DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build"
 ENV DATABASE_URL=${DATABASE_URL}
 RUN npx prisma generate
 
+RUN test -f dist/main.js || (echo "ERROR: pruner stage lost dist/main.js" && ls -laR dist 2>/dev/null || true && exit 1)
+
 # --- Runtime ---
 FROM node:20-alpine AS production
 WORKDIR /app
@@ -54,6 +57,9 @@ COPY --from=pruner --chown=nestjs:nodejs /app/dist ./dist
 COPY --from=pruner --chown=nestjs:nodejs /app/prisma ./prisma
 COPY --from=pruner --chown=nestjs:nodejs /app/prisma.config.ts ./
 COPY --from=pruner --chown=nestjs:nodejs /app/node_modules ./node_modules
+COPY --from=builder --chown=nestjs:nodejs /app/keys ./keys
+
+RUN test -f dist/main.js && test -r dist/main.js
 
 USER nestjs
 
@@ -65,4 +71,4 @@ EXPOSE 3013
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3013/health || exit 1
 
-CMD ["node", "dist/main"]
+CMD ["node", "dist/main.js"]

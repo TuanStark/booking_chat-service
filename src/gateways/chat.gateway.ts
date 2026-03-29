@@ -46,9 +46,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const token = client.handshake.auth.token || client.handshake.headers.authorization?.split(' ')[1];
       if (!token) { client.disconnect(); return; }
 
-      const payload = this.jwtService.verify(token);
-      const userId = payload.sub || payload.userId;
-      const role = payload.role || 'user';
+      const payload = this.jwtService.verify(token, { algorithms: ['RS256'] });
+      const userId = (payload.sub || payload.userId) as string | undefined;
+      const role = String(payload.role ?? payload.roleName ?? 'user').toLowerCase();
       if (!userId) { client.disconnect(); return; }
 
       // Track connection
