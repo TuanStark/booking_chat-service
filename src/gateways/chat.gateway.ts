@@ -13,6 +13,8 @@ import { JwtService } from '@nestjs/jwt';
 import { MessagesService } from '../modules/messages/messages.service';
 import { ConversationsService } from '../modules/conversations/conversations.service';
 import { ParticipantRole } from '@prisma/client';
+import { SendMessageDto } from '../modules/messages/dto/send-message.dto';
+import { JoinConversationDto, LeaveConversationDto, TypingEventDto, MarkReadDto } from './dto/ws-events.dto';
 import { WS_CLIENT_EVENTS, WS_SERVER_EVENTS, ROOM_PREFIX } from '../common/constants/events.constant';
 import { CORS_ALLOWED_ORIGINS } from '../config/cors.config';
 
@@ -90,7 +92,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.JOIN_CONVERSATION)
   handleJoinConversation(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string },
+    @MessageBody() data: JoinConversationDto,
   ) {
     client.join(`${ROOM_PREFIX.CONVERSATION}${data.conversationId}`);
     this.logger.log(`Socket ${client.id} joined room conversation:${data.conversationId}`);
@@ -99,7 +101,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.LEAVE_CONVERSATION)
   handleLeaveConversation(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string },
+    @MessageBody() data: LeaveConversationDto,
   ) {
     client.leave(`${ROOM_PREFIX.CONVERSATION}${data.conversationId}`);
   }
@@ -107,7 +109,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.SEND_MESSAGE)
   async handleSendMessage(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; content: string; type?: any; replyToId?: string },
+    @MessageBody() data: SendMessageDto,
   ) {
     const meta = this.socketMeta.get(client.id);
     if (!meta) { client.emit(WS_SERVER_EVENTS.ERROR, { message: 'Not authenticated' }); return; }
@@ -138,7 +140,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_START)
   handleTypingStart(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string },
+    @MessageBody() data: TypingEventDto,
   ) {
     const meta = this.socketMeta.get(client.id);
     if (!meta) return;
@@ -152,7 +154,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.TYPING_STOP)
   handleTypingStop(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string },
+    @MessageBody() data: TypingEventDto,
   ) {
     const meta = this.socketMeta.get(client.id);
     if (!meta) return;
@@ -165,7 +167,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WS_CLIENT_EVENTS.MARK_READ)
   async handleMarkRead(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { conversationId: string; messageId: string },
+    @MessageBody() data: MarkReadDto,
   ) {
     const meta = this.socketMeta.get(client.id);
     if (!meta) return;
