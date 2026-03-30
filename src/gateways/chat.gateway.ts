@@ -124,12 +124,31 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
 
       // Broadcast to all in conversation room (including sender for confirmation)
+      const messagePayload = {
+        ...message,
+        senderName: meta.userId, // Frontend will resolve name from user cache
+      };
+      
       this.server
         .to(`${ROOM_PREFIX.CONVERSATION}${data.conversationId}`)
-        .emit(WS_SERVER_EVENTS.NEW_MESSAGE, {
-          ...message,
-          senderName: meta.userId, // Frontend will resolve name from user cache
-        });
+        .emit(WS_SERVER_EVENTS.NEW_MESSAGE, messagePayload);
+
+      // ---- GLOBAL ALERTS FOR UNREAD NOTIFICATIONS ----
+      if (meta.role !== 'admin') {
+        // Broadcast to ALL admins in the admin support room
+        this.server.to(ROOM_PREFIX.ADMIN_SUPPORT).emit(WS_SERVER_EVENTS.NEW_MESSAGE, messagePayload);
+      } else {
+        // Admin sent a message. Find the customer's userId to alert their personal room.
+        try {
+          // Pass `meta.userId` and `isAdmin=true`
+          const conversation = await this.conversationsService.getConversation(data.conversationId, meta.userId, true);
+          if (conversation && conversation.userId) {
+            this.server.to(`${ROOM_PREFIX.USER}${conversation.userId}`).emit(WS_SERVER_EVENTS.NEW_MESSAGE, messagePayload);
+          }
+        } catch (err) {
+           this.logger.error(`Failed to broadcast to user room: ${err.message}`);
+        }
+      }
 
       this.logger.log(`📨 Message ${message.id} sent by ${meta.role}:${meta.userId}`);
     } catch (error) {
