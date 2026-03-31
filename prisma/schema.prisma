@@ -60,6 +60,15 @@ model Conversation {
   /// The user who initiated this support conversation
   userId String
 
+  /// Stable business key to make support conversations idempotent.
+  /// Current rule: one support thread per user across all user entry points.
+  supportKey String? @unique
+
+  /// When historical duplicates are merged, keep the row for audit but hide it
+  /// from normal list queries by linking it to the canonical conversation.
+  mergedIntoConversationId String?
+  mergedAt                 DateTime?
+
   /// Denormalized fields for fast conversation listing without JOINs.
   /// Updated atomically in a transaction when a new message is created.
   lastMessageId   String?   @unique
@@ -78,6 +87,7 @@ model Conversation {
   @@index([status])
   @@index([lastMessageAt(sort: Desc)])
   @@index([contextType, contextId])
+  @@index([mergedIntoConversationId])
   @@map("conversations")
 }
 

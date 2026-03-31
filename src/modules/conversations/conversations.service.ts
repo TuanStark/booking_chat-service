@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nest
 import { ConversationsRepository } from './conversations.repository';
 import { CreateConversationDto } from './dto/create-conversation.dto';
 import { ConversationQueryDto } from './dto/conversation-query.dto';
-import { ConversationStatus, ParticipantRole } from '@prisma/client';
+import { ConversationStatus, ParticipantRole, Prisma } from '@prisma/client';
 
 @Injectable()
 export class ConversationsService {
@@ -15,27 +15,67 @@ export class ConversationsService {
    * If user already has an active conversation with same context, return it (idempotent).
    */
   async createOrFind(userId: string, dto: CreateConversationDto) {
-    // Check for existing active conversation with same context
-    const existing = await this.conversationsRepo.findExistingSupport(
-      userId,
-      dto.contextType,
-      dto.contextId,
-    );
+    const supportKey = this.conversationsRepo.buildSupportKey(userId);
+    const existing = await this.conversationsRepo.findBySupportKey(supportKey);
     if (existing) {
-      this.logger.log(`Reusing existing conversation ${existing.id} for user ${userId}`);
+      const nextStatus =
+        existing.status === ConversationStatus.CLOSED
+          ? ConversationStatus.ACTIVE
+          : undefined;
+      const shouldBackfillContext =
+        !existing.contextType && !existing.contextId && dto.contextType && dto.contextId;
+
+      if (nextStatus || shouldBackfillContext) {
+        const updated = await this.conversationsRepo.updateConversationIdentity(
+          existing.id,
+          {
+            status: nextStatus,
+            title: existing.title ?? dto.title ?? 'Hỗ trợ khách hàng',
+            contextType: shouldBackfillContext ? dto.contextType : undefined,
+            contextId: shouldBackfillContext ? dto.contextId : undefined,
+          },
+        );
+        this.logger.log(
+          `Reused canonical conversation ${updated.id} for user ${userId}`,
+        );
+        return updated;
+      }
+
+      this.logger.log(
+        `Reused canonical conversation ${existing.id} for user ${userId}`,
+      );
       return existing;
     }
 
-    const conversation = await this.conversationsRepo.create({
-      userId,
-      title: dto.title || 'Hỗ trợ khách hàng',
-      type: dto.type,
-      contextType: dto.contextType,
-      contextId: dto.contextId,
-    });
+    try {
+      const conversation = await this.conversationsRepo.create({
+        userId,
+        title: dto.title || 'Hỗ trợ khách hàng',
+        type: dto.type,
+        contextType: dto.contextType,
+        contextId: dto.contextId,
+        supportKey,
+      });
 
-    this.logger.log(`Created conversation ${conversation.id} for user ${userId}`);
-    return conversation;
+      this.logger.log(
+        `Created canonical conversation ${conversation.id} for user ${userId}`,
+      );
+      return conversation;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const canonical = await this.conversationsRepo.findBySupportKey(supportKey);
+        if (canonical) {
+          this.logger.warn(
+            `Concurrent create avoided duplicate for user ${userId}; using ${canonical.id}`,
+          );
+          return canonical;
+        }
+      }
+      throw error;
+    }
   }
 
   /** Get conversations for a user (User side) */
@@ -52,6 +92,15 @@ export class ConversationsService {
   async getConversation(conversationId: string, userId: string, isAdmin: boolean) {
     const conversation = await this.conversationsRepo.findById(conversationId);
     if (!conversation) throw new NotFoundException('Conversation not found');
+
+    if (conversation.mergedIntoConversationId) {
+      const canonical = await this.conversationsRepo.findById(
+        conversation.mergedIntoConversationId,
+      );
+      if (canonical) {
+        return canonical;
+      }
+    }
 
     // Admin can see all, user can only see own
     if (!isAdmin) {

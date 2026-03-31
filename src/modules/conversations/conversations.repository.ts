@@ -6,12 +6,17 @@ import { ConversationStatus, ConversationType, ParticipantRole, Prisma } from '@
 export class ConversationsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  buildSupportKey(userId: string) {
+    return `support:user:${userId}`;
+  }
+
   async create(data: {
     userId: string;
     title?: string;
     type?: ConversationType;
     contextType?: string;
     contextId?: string;
+    supportKey?: string;
   }) {
     return this.prisma.conversation.create({
       data: {
@@ -20,6 +25,7 @@ export class ConversationsRepository {
         type: data.type || ConversationType.SUPPORT,
         contextType: data.contextType,
         contextId: data.contextId,
+        supportKey: data.supportKey,
         participants: {
           create: {
             userId: data.userId,
@@ -38,12 +44,20 @@ export class ConversationsRepository {
     });
   }
 
+  async findBySupportKey(supportKey: string) {
+    return this.prisma.conversation.findUnique({
+      where: { supportKey },
+      include: { participants: true },
+    });
+  }
+
   /** Find existing SUPPORT conversation between user and context */
   async findExistingSupport(userId: string, contextType?: string, contextId?: string) {
     const where: Prisma.ConversationWhereInput = {
       userId,
       type: ConversationType.SUPPORT,
       status: { not: ConversationStatus.CLOSED },
+      mergedIntoConversationId: null,
     };
     if (contextType && contextId) {
       where.contextType = contextType;
@@ -56,6 +70,7 @@ export class ConversationsRepository {
   async findByUserId(userId: string, status?: ConversationStatus) {
     const where: Prisma.ConversationWhereInput = {
       participants: { some: { userId } },
+      mergedIntoConversationId: null,
     };
     if (status) where.status = status;
 
@@ -76,7 +91,9 @@ export class ConversationsRepository {
     limit?: number;
   }) {
     const { status, search, page = 1, limit = 20 } = options;
-    const where: Prisma.ConversationWhereInput = {};
+    const where: Prisma.ConversationWhereInput = {
+      mergedIntoConversationId: null,
+    };
     if (status) where.status = status;
     if (search) {
       where.OR = [
@@ -103,6 +120,22 @@ export class ConversationsRepository {
     return this.prisma.conversation.update({
       where: { id },
       data: { status },
+    });
+  }
+
+  async updateConversationIdentity(
+    id: string,
+    data: {
+      status?: ConversationStatus;
+      title?: string;
+      contextType?: string;
+      contextId?: string;
+    },
+  ) {
+    return this.prisma.conversation.update({
+      where: { id },
+      data,
+      include: { participants: true },
     });
   }
 
